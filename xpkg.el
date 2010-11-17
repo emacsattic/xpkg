@@ -4,8 +4,8 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20101001
-;; Version: 0.1
+;; Updated: 20101117
+;; Version: 0.1.1
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
 
@@ -28,7 +28,7 @@
 
 ;; Extract information from Emacs Lisp packages.
 ;; Packages are required to be stored inside git repositories.
-;; Also see package `elx'.
+;; Also see package `elx' which extracts information from libraries.
 
 ;;; Code:
 
@@ -44,13 +44,14 @@ The metadata is extracted from revision REV in the git repository REPO.
 If optional BRANCH is specified it should be the branch containing REV.
 It is only used to get the branch homepage from \".git/config\" if it
 can not be determined otherwise."
-  (let ((features (xpkg-features name repo rev nil t))
-	(mainfile (xpkg-mainfile name repo rev)))
+  (let* ((features (xpkg-features name repo rev nil t))
+	 (hard-deps (nth 1 features))
+	 (soft-deps (nth 2 features))
+	 (mainfile (xpkg-mainfile name repo rev)))
     (lgit-with-file repo rev mainfile
       (let ((wikipage
 	     (or (elx-wikipage mainfile name nil t)
-		 (let ((page (or (lgit-get repo "elm.wikipage")
-				 (lgit-get repo "xpkg.wikipage"))))
+		 (let ((page (lgit-get repo "xpkg.wikipage")))
 		   (when page
 		     (concat "http://www.emacswiki.org/" page))))))
 	(list :summary (elx-summary nil t)
@@ -61,10 +62,10 @@ can not be determined otherwise."
 	      :maintainer (elx-maintainer nil t)
 	      :adapted-by (elx-adapted-by nil t)
 	      :provided (car features)
-	      :required (unless (equal (cdr features) '(nil nil))
-			  (if (equal (cddr features) '(nil))
-			      (list (cadr features))
-			    (cdr features)))
+	      :required (when (or hard-deps soft-deps)
+			  (if soft-deps
+			      (list hard-deps soft-deps)
+			    (list hard-deps)))
 	      :keywords (elx-keywords mainfile t)
 	      :homepage (or (elx-homepage)
 			    (lgit-branch-get repo branch "elm-homepage")
@@ -207,8 +208,7 @@ If optional CHECK is non-nil also report unsatisfied dependencies."
 (defsubst xpkg-get-all (repo variable)
   (cdr (lgit repo 1 "config --get-all %s" variable)))
 
-(defun xpkg-features (name repo rev
-				  &optional associate dependencies batch)
+(defun xpkg-features (name repo rev &optional associate dependencies batch)
   "Process the features of the package named NAME.
 
 REPO is the path to the git repository containing the package; it may be
@@ -218,7 +218,8 @@ If optional DEPENDENCIES is non-nil return a list of the form:
 
   ((PROVIDED-FEATURE...)
    ((PROVIDING-PACKAGE HARD-REQUIRED-FEATURE...)...)
-   ((PROVIDING-PACKAGE HARD-REQUIRED-FEATURE...)...))
+   ((PROVIDING-PACKAGE SOFT-REQUIRED-FEATURE...)...)
+   (BUNDLED-FEATURE...))
 
 Otherwise return:
 
@@ -228,63 +229,68 @@ If optional ASSOCIATE is non-nil associate the provided features with the
 package in the value of variable `xpkg-feature-alist', if appropriate.
 
 Also see the source comments of this function for more information."
-  (let (required provided bundled
+  (let (required
+	bundled
+	(provided (mapcar 'intern (xpkg-get-all repo "elm.include-provided")))
 	;; Sometimes features provided by a packages repository have to be
 	;; excluded from the list of features provided by the package.
 	;; This usually is the case when a package bundles libraries that
 	;; originate from another package.  Note that this is sometimes
-	;; done even for bundled packages are not mirrored themselves (yet).
+	;; done even for bundled packages that are not mirrored themselves
+	;; (yet).
 	;;
-	;; This does not result in unresolved dependencies (also see below),
-	;; on the opposite the package actually providing the bundled
-	;; features is not even added to the list of dependencies so we can
-	;; be sure the bundled libraries are loaded which might differ from
-	;; those of the package they originate from.
+	;; Likewise required features sometimes are not real dependencies;
+	;; E.g. when they are only required to test the package.
 	;;
-	;; If no other package depends on the same features (or does also
-	;; bundle them) this is a good solution.  However when other
-	;; packages also require the packages providing these features
-	;; the libraries in the original packages conflict with the
-	;; bundled libraries - we simply can't do anything about that and
-	;; must hope the file that gets loaded based in it's position in
-	;; `load-path' works for all packages that depend on it.
-	;;
-	;; Features are excluded by setting the git variables "elm.exclude"
-	;; (can be specified multiple times, matching features are excluded)
-	;; and "elm.exclude-path" (files whose path match are excluded) in
-	;; the packages repository.
+	;; These git variables are used to record features and files that
+	;; should be ignored.  For more information see below.
 	(exclude-required
 	 (mapcar #'intern (xpkg-get-all repo "elm.exclude-required")))
 	(exclude-provided
-	 (mapcar #'intern (nconc (xpkg-get-all repo "elm.exclude-provided")
-				 (xpkg-get-all repo "elm.exclude"))))
-	(exclude-path (cadr (lgit repo 1 "config elm.exclude-path"))))
+	 (mapcar #'intern (xpkg-get-all repo "elm.exclude-provided")))
+	(exclude-path     (cadr (lgit repo 1 "config elm.exclude-path")))
+	(include-required (xpkg-get-all repo "elm.include-required")))
     (dolist (file (elx-elisp-files-git repo rev))
-      (dolist (prov (lgit-with-file repo rev file
-		      (elx--buffer-provided)))
-	(if (or (member prov exclude-provided)
-		(and exclude-path (string-match exclude-path file)))
-	    (push prov bundled)
-	  (when prov
-	    (push prov provided))
-	  (when dependencies
-	    ;; Even if some of the features provided by this file are
-	    ;; excluded do not exclude the required features if at least
-	    ;; one of the provided features is not excluded.  We do this
-	    ;; because the file might be legitimately belong the the
-	    ;; package but might never-the-less illegitimately provide
-	    ;; a foreign feature to indicate that is a drop-in replacement
-	    ;; or whatever.
-	    ;;
-	    ;; If multiple features are provided and not excluded then the
-	    ;; required features are added multiple times to the list of
-	    ;; required features at this point but that is not a problem
-	    ;; as duplicates are later removed.
-	    ;;
-	    ;; Since it is rare that a file provides multiple features, we
-	    ;; don't care if we extract the dependencies multiple times.
-	    (push (lgit-with-file repo rev file (elx--buffer-required))
-		  required)))))
+      ;; Files that match "elm.exclude-path" are ignored completely; that
+      ;; is neither the features they provide nor those they require
+      ;; appear anywhere in the return value of this function at all.
+      ;; Use this e.g. for libraries that contain only tests.
+      (unless (and exclude-path (string-match exclude-path file))
+	(dolist (prov (lgit-with-file repo rev file (elx--buffer-provided)))
+	  ;; If a package bundles required dependencies we do not want
+	  ;; these features to appear in the list of provided features so
+	  ;; that other packages do not pull in these packages instead of
+	  ;; the real upstream package.
+	  ;;
+	  ;; We do this even if the upstream package is not mirrored yet;
+	  ;; which means that other packages depending on features from
+	  ;; the upstream package will have unresolved dependencies,  but
+	  ;; that is still better than instead depending on the current
+	  ;; package whose purpose might be something completely different
+	  ;; but just happens to have a common dependency.  However for
+	  ;; the current package these features are not considered to be
+	  ;; missing.
+	  ;;
+	  ;; If a bundled feature is not provided by any mirrored package
+	  ;; that feature is neither listed as required nor a provided
+	  ;; feature of this package in the output of this function.
+	  ;;
+	  ;; If a bundled feature is also provided by the mirrored
+	  ;; upstream package that package along with the feature shows up
+	  ;; in the list of required packages.
+	  (if (member prov exclude-provided)
+	      (add-to-list 'bundled prov)
+	    (when prov
+	      (add-to-list 'provided prov))
+	    (when dependencies
+	      ;; Even if some of the features provided by this file are
+	      ;; excluded do not exclude the required features.  We do
+	      ;; this because the file might be legitimately belong to the
+	      ;; package but might never-the-less illegitimately provide
+	      ;; a foreign feature to indicate that is a drop-in
+	      ;; replacement or whatever.
+	      (push (lgit-with-file repo rev file (elx--buffer-required))
+		    required))))))
     (setq provided (elx--sanitize-provided provided t))
     (when associate
       ;; If and only if optional argument ASSOCIATE is non-nil add
@@ -295,17 +301,17 @@ Also see the source comments of this function for more information."
       ;; In case of conflict and regardless which package wins a warning
       ;; is shown.
       ;;
-      ;; The value of `xpkg-feature-alist' is not updated always
-      ;; updated when this function is called because is called for all
-      ;; versions as well as the tips of all vendor branches and these
-      ;; different revisions might differ in what features they provide.
-      ;; If the caller of this function could not control whether
-      ;; associations are updated or not could seemingly randomly change
-      ;; depending on what revision was last processed.
+      ;; The value of `xpkg-feature-alist' is not always updated when this
+      ;; function is called because it is called for all versions as well
+      ;; as the tips of all vendor branches and these different revisions
+      ;; might differ in what features they provide.  If the caller of this
+      ;; function could not control whether associations are updated or not
+      ;; this could result in seemingly random change depending on what
+      ;; revision was last processed.
       ;;
       ;; Since Emacs provides no way to specify what version of a package
       ;; another package depends on a particular revision had to be
-      ;; choosen whose provided features are recorded to calculate the
+      ;; chosen whose provided features are recorded to calculate the
       ;; dependencies of other packages.  The latest tagged revision
       ;; of the "main" vendor or if no tagged revision exists it's tip
       ;; has been chosen for this purpose, but this is controlled by the
@@ -323,43 +329,42 @@ Also see the source comments of this function for more information."
 	;; Keep `xpkg-feature-alist' sorted.
 	(xpkg-asort 'xpkg-feature-alist)))
     (if (not dependencies)
+	;; This function usually is called to update/create revision epkgs
+	;; and to updated the value of variable `xpkg-feature-alist' by
+	;; side-effect.  However in some cases we only need to do the
+	;; latter so it is possible to skip the step of determining the
+	;; dependencies.
 	provided
-      ;; This function usually is called to update/create revision epkgs
-      ;; and to updated the value of variable `xpkg-feature-alist' by
-      ;; side-effect.  However in some cases we only need to do the latter
-      ;; so it is possible to skip the step of determine the dependencies.
-      ;; In this case we also return nil.
-      (setq required (elx--sanitize-required required
-						  provided t))
-      (let ((hard (xpkg-lookup-required (nth 0 required) exclude-required))
-	    (soft (xpkg-lookup-required (nth 1 required) exclude-required)))
-	;; If the package providing a particular feature can not be
-	;; determined and the providing library also isn't bundled report
-	;; a warning here.
-	(dolist (dep (cdr (assoc nil hard)))
-	  (unless (memq dep bundled)
-	    (xpkg-log "%s (%s): hard required %s not available" name rev dep)))
-	(dolist (dep (cdr (assoc nil soft)))
-	  (unless (memq dep bundled)
-	    (xpkg-log "%s (%s): soft required %s not available" name rev dep)))
-	(when (or (member name hard)
-		  (member name soft))
-	  (error "fatal: %s requires itself" name))
-	(list provided hard soft)))))
+      (setq required (elx--sanitize-required required provided t))
+      (list provided
+	    (xpkg-lookup-required name rev 'hard (nth 0 required)
+				  exclude-required)
+	    (xpkg-lookup-required name rev 'soft (nth 1 required)
+				  exclude-required)
+	    (sort bundled 'string<)))))
 
-(defun xpkg-lookup-required (required exclude)
+(defun xpkg-lookup-required (name rev type required exclude)
   "Return the packages providing all features in list REQUIRED.
-The returned value has the form: ((PACKAGE FEATURE...)...)."
+The returned value has the form: ((PACKAGE FEATURE...)...).  If a feature
+is provided by a package that is part of Emacs PACKAGE is \"emacs\" even
+if the real package is also mirrored.  If the package providing a feature
+is not known PACKAGE is nil and if the feature also is not part of EXCLUDE
+a warning is also shown.  The other arguments are only used for these
+waring messages."
   (let (packages)
     (dolist (feature required)
       (let ((package (xpkg-lookup-required-1 feature exclude)))
-	(unless (eq package :excluded)
-	  (let ((entry (assoc package packages)))
-	    (if entry
-		(unless (memq feature (cdr entry))
-		  (setcdr entry (sort (cons feature (cdr entry))
-				      'string<)))
-	      (push (list package feature) packages))))))
+	(case package
+	  (:excluded)
+	  (nil
+	   (xpkg-log "%s (%s): %s required %s not available"
+		     name rev type feature))
+	  (t
+	   (let ((entry (assoc package packages)))
+	     (if entry
+		 (unless (memq feature (cdr entry))
+		   (setcdr entry (sort (cons feature (cdr entry)) 'string<)))
+	       (push (list package feature) packages)))))))
     (sort* packages
 	   (lambda (a b)
 	     (cond ((null a) nil)
@@ -387,7 +392,7 @@ The message also goes into the `*Messages*' and `*xpkg-log*' buffers."
     (insert (concat (apply #'message format-string args) "\n"))))
 
 (defun xpkg-show-log ()
-  "Pop to the buffer named \"*xpkg-log*\"."
+  "Pop to the buffer named \"*xpkg-log*\" if it exists."
   (interactive)
   (let ((buffer (get-buffer "*xpkg-log*")))
     (when buffer
