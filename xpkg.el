@@ -1,11 +1,11 @@
 ;;; xpkg.el --- extract information from Emacs Lisp packages
 
-;; Copyright (C) 2010  Jonas Bernoulli
+;; Copyright (C) 2010-2011  Jonas Bernoulli
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20101117
-;; Version: 0.1.1
+;; Updated: 20110131
+;; Version: 0.1.1-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
 
@@ -76,7 +76,7 @@ can not be determined otherwise."
 	      (unless (lgit-branch-get repo branch "xpkg-no-commentary")
 		(elx-commentary mainfile)))))))
 
-(defun xpkg-mainfile (name repo rev)
+(defun xpkg-mainfile (name repo rev &optional not-initialized-p)
   "Return the mainfile of the package named NAME.
 
 The mainfile is extracted from revision REV in the git repository REPO,
@@ -90,7 +90,7 @@ removed from the end, whatever makes sense; case is ignored.  If no match
 for NAME is found then the value of the git variable \"elm.mainfile\" is
 returned, if it is defined and the respective file actually exists in the
 specified revision."
-  (let ((files (elx-elisp-files-git repo rev)))
+  (let ((files (elx-elisp-files (if not-initialized-p repo (cons repo rev)))))
     (if (= 1 (length files))
 	(car files)
       (flet ((match (feature)
