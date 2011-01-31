@@ -50,10 +50,10 @@ can not be determined otherwise."
 	 (mainfile (xpkg-mainfile name repo rev)))
     (lgit-with-file repo rev mainfile
       (let ((wikipage
-	     (or (elx-wikipage mainfile name nil t)
-		 (let ((page (lgit-get repo "xpkg.wikipage")))
+	     (or (let ((page (lgit-get repo "xpkg.wikipage")))
 		   (when page
-		     (concat "http://www.emacswiki.org/" page))))))
+		     (concat "http://www.emacswiki.org/" page)))
+		 (elx-wikipage mainfile name nil t))))
 	(list :summary (elx-summary nil t)
 	      :created (elx-created)
 	      :updated (elx-updated)
