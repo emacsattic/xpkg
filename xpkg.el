@@ -5,7 +5,7 @@
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
 ;; Updated: 20110131
-;; Version: 0.1.1-git
+;; Version: 0.1.2
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
 
