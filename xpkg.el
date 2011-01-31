@@ -102,7 +102,7 @@ specified revision."
 		       (substring name 0 -5)
 		     (concat name "-mode")))
 	    (let ((mainfile (lgit-get repo "elm.mainfile")))
-	      (when (and mainfile (member mainfile files))
+	      (when (or (not files) (member mainfile files))
 		mainfile)))))))
 
 (defmacro xpkg-with-mainfile (name repo rev &rest body)
