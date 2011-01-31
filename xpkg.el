@@ -117,6 +117,15 @@ specified revision."
 			  (error "The mainfile can not be determined"))
 	,@body))))
 
+(defun xpkg-wikipage (name repo rev &optional as-url)
+  (let ((page (or (lgit-get repo "xpkg.wikipage")
+		  (let ((mainfile (xpkg-mainfile name repo rev)))
+		    (lgit-with-file repo rev mainfile
+		      (elx-wikipage mainfile name))))))
+    (if (and page as-url)
+	(concat "http://www.emacswiki.org/" page)
+      page)))
+
 (defsubst xpkg-asort (variable)
   (set variable (sort* (symbol-value variable) 'string< :key 'car)))
 
