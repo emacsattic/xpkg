@@ -4,8 +4,8 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110131
-;; Version: 0.1.2
+;; Updated: 20110226
+;; Version: 0.1.2-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
 
@@ -29,12 +29,15 @@
 ;; Extract information from Emacs Lisp packages.
 ;; Packages are required to be stored inside git repositories.
 ;; Also see package `elx' which extracts information from libraries.
+;; Currently this package requires `elm' but that dependency will
+;; probably be remove in the future.
 
 ;;; Code:
 
 (require 'cl)
 (require 'lgit)
 (require 'elx)
+(require 'elm)
 
 (defun xpkg-metadata (name repo rev &optional branch)
   "Return the metadata of the package named NAME.
@@ -44,17 +47,21 @@ The metadata is extracted from revision REV in the git repository REPO.
 If optional BRANCH is specified it should be the branch containing REV.
 It is only used to get the branch homepage from \".git/config\" if it
 can not be determined otherwise."
-  (let* ((features (xpkg-features name repo rev nil t))
+  (let* ((config (elm-package-config name))
+	 (fetcher (plist-get config :fetcher))
+	 (features (xpkg-features name repo rev nil t))
 	 (hard-deps (nth 1 features))
 	 (soft-deps (nth 2 features))
 	 (mainfile (xpkg-mainfile name repo rev)))
     (lgit-with-file repo rev mainfile
       (let ((wikipage
-	     (or (let ((page (lgit-get repo "xpkg.wikipage")))
+	     (or (let ((page (plist-get config :wikipage)))
 		   (when page
 		     (concat "http://www.emacswiki.org/" page)))
 		 (elx-wikipage mainfile name nil t))))
 	(list :summary (elx-summary nil t)
+	      :repository (when (memq fetcher '(bzr cvs darcs git hg svn))
+			    (cons fetcher (plist-get config :url)))
 	      :created (elx-created)
 	      :updated (elx-updated)
 	      :license (elx-license)
@@ -68,12 +75,12 @@ can not be determined otherwise."
 			    (list hard-deps)))
 	      :keywords (elx-keywords mainfile t)
 	      :homepage (or (elx-homepage)
-			    (lgit-branch-get repo branch "elm-homepage")
-			    (when (equal (or branch rev) "emacswiki")
+			    (plist-get config :homepage)
+			    (when (equal branch "emacswiki")
 			      wikipage))
 	      :wikipage wikipage
 	      :commentary
-	      (unless (lgit-branch-get repo branch "xpkg-no-commentary")
+	      (unless (plist-get config :bad-encoding)
 		(elx-commentary mainfile)))))))
 
 (defun xpkg-mainfile (name repo rev &optional not-initialized-p)
@@ -101,7 +108,7 @@ specified revision."
 	    (match (if (string-match "-mode$" name)
 		       (substring name 0 -5)
 		     (concat name "-mode")))
-	    (let ((mainfile (lgit-get repo "elm.mainfile")))
+	    (let ((mainfile (plist-get (elm-package-config name) :mainfile)))
 	      (when (or (not files) (member mainfile files))
 		mainfile)))))))
 
@@ -118,7 +125,7 @@ specified revision."
 	,@body))))
 
 (defun xpkg-wikipage (name repo rev &optional as-url)
-  (let ((page (or (lgit-get repo "xpkg.wikipage")
+  (let ((page (or (plist-get (elm-package-config name) :wikipage)
 		  (let ((mainfile (xpkg-mainfile name repo rev)))
 		    (lgit-with-file repo rev mainfile
 		      (elx-wikipage mainfile name))))))
@@ -214,9 +221,6 @@ If optional CHECK is non-nil also report unsatisfied dependencies."
      packages))
   (xpkg-asort 'xpkg-feature-alist))
 
-(defsubst xpkg-get-all (repo variable)
-  (cdr (lgit repo 1 "config --get-all %s" variable)))
-
 (defun xpkg-features (name repo rev &optional associate dependencies batch)
   "Process the features of the package named NAME.
 
@@ -238,32 +242,25 @@ If optional ASSOCIATE is non-nil associate the provided features with the
 package in the value of variable `xpkg-feature-alist', if appropriate.
 
 Also see the source comments of this function for more information."
-  (let (required
-	bundled
-	(provided (mapcar 'intern (xpkg-get-all repo "elm.include-provided")))
-	;; Sometimes features provided by a packages repository have to be
-	;; excluded from the list of features provided by the package.
-	;; This usually is the case when a package bundles libraries that
-	;; originate from another package.  Note that this is sometimes
-	;; done even for bundled packages that are not mirrored themselves
-	;; (yet).
-	;;
-	;; Likewise required features sometimes are not real dependencies;
-	;; E.g. when they are only required to test the package.
-	;;
-	;; These git variables are used to record features and files that
-	;; should be ignored.  For more information see below.
-	(exclude-required
-	 (mapcar #'intern (xpkg-get-all repo "elm.exclude-required")))
-	(exclude-provided
-	 (mapcar #'intern (xpkg-get-all repo "elm.exclude-provided")))
-	(exclude-path     (cadr (lgit repo 1 "config elm.exclude-path")))
-	(include-required (xpkg-get-all repo "elm.include-required")))
+  (let* (required
+	 bundled
+	 (config (elm-package-config name))
+	 (provided (mapcar 'intern (plist-get config :include-provided)))
+	 ;; When a package bundles libraries also distributed seperately
+	 ;; the features these libraries provide have to be excluded from
+	 ;; the list of features provided by the package.
+	 ;;
+	 ;; Likewise some features that appear to be required by a package
+	 ;; sometimes are not, because they are only needed for testing or
+	 ;; by some library belonging to the package which is normally not
+	 ;; loaded.
+	 (exclude-required (plist-get config :exclude-required))
+	 (exclude-provided (plist-get config :exclude-provided))
+	 (exclude-path     (plist-get config :exclude-path)))
     (dolist (file (elx-elisp-files-git repo rev))
-      ;; Files that match "elm.exclude-path" are ignored completely; that
-      ;; is neither the features they provide nor those they require
-      ;; appear anywhere in the return value of this function at all.
-      ;; Use this e.g. for libraries that contain only tests.
+      ;; Files that match `exclude-path' are ignored completely; neither
+      ;; the provided nor required features appear anywhere in the return
+      ;; value of this function at all.
       (unless (and exclude-path (string-match exclude-path file))
 	(dolist (prov (lgit-with-file repo rev file (elx--buffer-provided)))
 	  ;; If a package bundles required dependencies we do not want
@@ -276,7 +273,7 @@ Also see the source comments of this function for more information."
 	  ;; the upstream package will have unresolved dependencies,  but
 	  ;; that is still better than instead depending on the current
 	  ;; package whose purpose might be something completely different
-	  ;; but just happens to have a common dependency.  However for
+	  ;; but just happens to provide a common dependency.  However for
 	  ;; the current package these features are not considered to be
 	  ;; missing.
 	  ;;
