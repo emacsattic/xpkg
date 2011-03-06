@@ -29,8 +29,6 @@
 ;; Extract information from Emacs Lisp packages.
 ;; Packages are required to be stored inside git repositories.
 ;; Also see package `elx' which extracts information from libraries.
-;; Currently this package requires `elm' but that dependency will
-;; probably be remove in the future.
 
 ;;; Code:
 
@@ -39,14 +37,13 @@
 (require 'elx)
 (require 'elm)
 
-(defun xpkg-metadata (name repo ref)
+(defun xpkg-metadata (name repo ref &optional config)
   "Return the metadata of REF in REPO of the package named NAME."
-  (let* ((config (elm-package-config name))
-	 (fetcher (plist-get config :fetcher))
+  (let* ((fetcher (plist-get config :fetcher))
 	 (features (xpkg-features name repo ref nil t))
 	 (hard-deps (nth 1 features))
 	 (soft-deps (nth 2 features))
-	 (mainfile (xpkg-mainfile name repo ref)))
+	 (mainfile (xpkg-mainfile name repo ref config)))
     (lgit-with-file repo ref mainfile
       (let ((wikipage (or (let ((page (plist-get config :wikipage)))
 			    (when page
@@ -75,15 +72,16 @@
 	      :commentary (unless (plist-get config :bad-encoding)
 			    (elx-commentary mainfile)))))))
 
-(defun xpkg-mainfile (name repo ref &optional not-initialized-p)
+(defun xpkg-mainfile (name repo ref &optional config)
   "Return the mainfile of REF in REPO of the package named NAME.
 
 The returned path is relative to REPO of nil if the mainfile can't be
 determined.  If REF contains only one file return that.  Otherwise return
 the path of the file whose basename matches NAME or NAME with \"-mode\"
 added to or removed from the end, whatever makes sense; case is ignored.
-If there is still no match try to extract the value from the plist CONFIG."
-  (let ((files (elx-elisp-files (if not-initialized-p repo (cons repo ref)))))
+If there is still no match try to extract the value of `:mainfile' from
+the plist CONFIG."
+  (let ((files (elx-elisp-files (cons repo ref))))
     (if (= 1 (length files))
 	(car files)
       (flet ((match (feature)
@@ -98,14 +96,16 @@ If there is still no match try to extract the value from the plist CONFIG."
 	      (when (or (not files) (member mainfile files))
 		mainfile)))))))
 
-(defmacro xpkg-with-mainfile (name repo ref &rest body)
- (declare (indent 3) (debug t))
+(defmacro xpkg-with-mainfile (name repo ref config &rest body)
+ (declare (indent 4) (debug t))
  (let ((repo-sym (make-symbol "--xpkg-with-mainfile-repo--"))
-       (ref-sym (make-symbol "--xpkg-with-mainfile-ref--")))
+       (ref-sym  (make-symbol "--xpkg-with-mainfile-ref--"))
+       (conf-sym (make-symbol "--xpkg-with-mainfile-conf--")))
    `(let ((,repo-sym ,repo)
-	  (,ref-sym ,ref))
+	  (,ref-sym  ,ref)
+	  (,conf-sym ,config))
       (lgit-with-file ,repo-sym ,ref-sym
-		      (or (xpkg-mainfile name ,repo-sym ,ref-sym)
+		      (or (xpkg-mainfile name ,repo-sym ,ref-sym ,conf-sym)
 			  (error "The mainfile can not be determined"))
 	,@body))))
 
@@ -118,7 +118,7 @@ Has the form ((KEYWORD PACKAGE...)...).")
 
 (defun xpkg-initialize-keyword-alist (packages)
   "Initialize the value of `xpkg-keyword-alist'.
-PACKAGES is a list of the form ((NAME REPO REF)...)."
+PACKAGES is a list of the form ((NAME REPO REF CONFIG)...)."
   (interactive)
   (setq xpkg-keyword-alist nil)
   (mapc-with-progress-reporter
@@ -128,13 +128,13 @@ PACKAGES is a list of the form ((NAME REPO REF)...)."
    packages)
   (xpkg-asort 'xpkg-keyword-alist))
 
-(defun xpkg-keywords (name repo ref &optional associate nosort)
+(defun xpkg-keywords (name repo ref &optional config associate nosort)
   "Process the keywords of REF in REPO of the package named NAME.
 
 Return a sorted list of the provided keywords.  If optional ASSOCIATE is
 non-nil associate the package with the the defined keywords in the value
 of variable `xpkg-keyword-alist'."
-  (let ((keywords (xpkg-with-mainfile name repo ref (elx-keywords))))
+  (let ((keywords (xpkg-with-mainfile name repo ref config (elx-keywords))))
     (if (not associate)
 	keywords
       (dolist (keyword keywords)
@@ -175,12 +175,11 @@ the providing package, a string.  This variable has to be set when using
 function `xpkg-features' with the DEPENDENCIES argument; this can
 be done by first calling this function for all known packages.")
 
-(defun xpkg-initialize-feature-alist (packages &optional check)
+(defun xpkg-initialize-feature-alist (packages)
   "Recreate the value of `xpkg-feature-alist'.
 
 PACKAGES is a list of the form ((NAME REPOSITORY REF)...).
-If multiple packages provide the same features this is logged.
-If optional CHECK is non-nil also report unsatisfied dependencies."
+If multiple packages provide the same features this is logged."
   (interactive)
   (setq xpkg-feature-alist nil)
   (mapc-with-progress-reporter
@@ -188,12 +187,11 @@ If optional CHECK is non-nil also report unsatisfied dependencies."
    (lambda (elt)
      (apply 'xpkg-features (append elt (list t nil t))))
    packages)
-  (when check
-    (mapc-with-progress-reporter
-     "Checking feature consistency..."
-     (lambda (elt)
-       (apply 'xpkg-features (append elt (list t t t))))
-     packages))
+  (mapc-with-progress-reporter
+   "Checking feature consistency..."
+   (lambda (elt)
+     (apply 'xpkg-features (append elt (list t t t))))
+   packages)
   (xpkg-asort 'xpkg-feature-alist))
 
 (defun xpkg-features (name repo ref &optional associate dependencies batch)
