@@ -48,11 +48,10 @@
 	 (soft-deps (nth 2 features))
 	 (mainfile (xpkg-mainfile name repo ref)))
     (lgit-with-file repo ref mainfile
-      (let ((wikipage
-	     (or (let ((page (plist-get config :wikipage)))
-		   (when page
-		     (concat "http://www.emacswiki.org/" page)))
-		 (elx-wikipage mainfile name nil t))))
+      (let ((wikipage (or (let ((page (plist-get config :wikipage)))
+			    (when page
+			      (concat "http://www.emacswiki.org/" page)))
+			  (elx-wikipage mainfile name nil t))))
 	(list :summary (elx-summary nil t)
 	      :repository (when (memq fetcher '(bzr cvs darcs git hg svn))
 			    (cons fetcher (plist-get config :url)))
@@ -73,9 +72,8 @@
 			    (when (eq 'wiki (plist-get config :fetcher))
 			      wikipage))
 	      :wikipage wikipage
-	      :commentary
-	      (unless (plist-get config :bad-encoding)
-		(elx-commentary mainfile)))))))
+	      :commentary (unless (plist-get config :bad-encoding)
+			    (elx-commentary mainfile)))))))
 
 (defun xpkg-mainfile (name repo ref &optional not-initialized-p)
   "Return the mainfile of REF in REPO of the package named NAME.
