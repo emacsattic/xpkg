@@ -4,7 +4,7 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110226
+;; Updated: 20110306
 ;; Version: 0.1.2-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
@@ -39,14 +39,10 @@
 (require 'elx)
 (require 'elm)
 
-(defun xpkg-metadata (name repo rev &optional branch)
+(defun xpkg-metadata (name repo ref)
   "Return the metadata of the package named NAME.
 
-The metadata is extracted from revision REV in the git repository REPO.
-
-If optional BRANCH is specified it should be the branch containing REV.
-It is only used to get the branch homepage from \".git/config\" if it
-can not be determined otherwise."
+The metadata is extracted from revision REV in the git repository REPO."
   (let* ((config (elm-package-config name))
 	 (fetcher (plist-get config :fetcher))
 	 (features (xpkg-features name repo rev nil t))
@@ -76,7 +72,7 @@ can not be determined otherwise."
 	      :keywords (elx-keywords mainfile t)
 	      :homepage (or (elx-homepage)
 			    (plist-get config :homepage)
-			    (when (equal branch "emacswiki")
+			    (when (eq 'wiki (plist-get config :fetcher))
 			      wikipage))
 	      :wikipage wikipage
 	      :commentary
