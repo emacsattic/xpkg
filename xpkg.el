@@ -40,16 +40,14 @@
 (require 'elm)
 
 (defun xpkg-metadata (name repo ref)
-  "Return the metadata of the package named NAME.
-
-The metadata is extracted from revision REV in the git repository REPO."
+  "Return the metadata of REF in REPO of the package named NAME."
   (let* ((config (elm-package-config name))
 	 (fetcher (plist-get config :fetcher))
-	 (features (xpkg-features name repo rev nil t))
+	 (features (xpkg-features name repo ref nil t))
 	 (hard-deps (nth 1 features))
 	 (soft-deps (nth 2 features))
-	 (mainfile (xpkg-mainfile name repo rev)))
-    (lgit-with-file repo rev mainfile
+	 (mainfile (xpkg-mainfile name repo ref)))
+    (lgit-with-file repo ref mainfile
       (let ((wikipage
 	     (or (let ((page (plist-get config :wikipage)))
 		   (when page
@@ -79,21 +77,15 @@ The metadata is extracted from revision REV in the git repository REPO."
 	      (unless (plist-get config :bad-encoding)
 		(elx-commentary mainfile)))))))
 
-(defun xpkg-mainfile (name repo rev &optional not-initialized-p)
-  "Return the mainfile of the package named NAME.
+(defun xpkg-mainfile (name repo ref &optional not-initialized-p)
+  "Return the mainfile of REF in REPO of the package named NAME.
 
-The mainfile is extracted from revision REV in the git repository REPO,
-and is returned as a path relative to REPO.  If the mainfile can't be
-determined nil is returned.
-
-If the revision contains only one file whose basename matches the regular
-expression\"\\\\.el\\\\(\\\\.in\\\\)$\" return it's basename.  Otherwise return
-the basename of the file matching NAME or NAME with \"-mode\" added to or
-removed from the end, whatever makes sense; case is ignored.  If no match
-for NAME is found then the value of the git variable \"elm.mainfile\" is
-returned, if it is defined and the respective file actually exists in the
-specified revision."
-  (let ((files (elx-elisp-files (if not-initialized-p repo (cons repo rev)))))
+The returned path is relative to REPO of nil if the mainfile can't be
+determined.  If REF contains only one file return that.  Otherwise return
+the path of the file whose basename matches NAME or NAME with \"-mode\"
+added to or removed from the end, whatever makes sense; case is ignored.
+If there is still no match try to extract the value from the plist CONFIG."
+  (let ((files (elx-elisp-files (if not-initialized-p repo (cons repo ref)))))
     (if (= 1 (length files))
 	(car files)
       (flet ((match (feature)
@@ -108,15 +100,14 @@ specified revision."
 	      (when (or (not files) (member mainfile files))
 		mainfile)))))))
 
-(defmacro xpkg-with-mainfile (name repo rev &rest body)
- "Execute BODY in a buffer containing the mainfile of the package named NAME."
+(defmacro xpkg-with-mainfile (name repo ref &rest body)
  (declare (indent 3) (debug t))
  (let ((repo-sym (make-symbol "--xpkg-with-mainfile-repo--"))
-       (rev-sym (make-symbol "--xpkg-with-mainfile-rev--")))
+       (ref-sym (make-symbol "--xpkg-with-mainfile-ref--")))
    `(let ((,repo-sym ,repo)
-	  (,rev-sym ,rev))
-      (lgit-with-file ,repo-sym ,rev-sym
-		      (or (xpkg-mainfile name ,repo-sym ,rev-sym)
+	  (,ref-sym ,ref))
+      (lgit-with-file ,repo-sym ,ref-sym
+		      (or (xpkg-mainfile name ,repo-sym ,ref-sym)
 			  (error "The mainfile can not be determined"))
 	,@body))))
 
@@ -125,12 +116,11 @@ specified revision."
 
 (defvar xpkg-keyword-alist nil
   "Alist of known keywords and the associated packages.
-Each element is a cons cell whose car is a keyword string and whose cdr is
-a list of associated packages.")
+Has the form ((KEYWORD PACKAGE...)...).")
 
 (defun xpkg-initialize-keyword-alist (packages)
   "Initialize the value of `xpkg-keyword-alist'.
-PACKAGES is a list of the form ((NAME REPOSITORY REVISION)...)."
+PACKAGES is a list of the form ((NAME REPO REF)...)."
   (interactive)
   (setq xpkg-keyword-alist nil)
   (mapc-with-progress-reporter
@@ -140,17 +130,13 @@ PACKAGES is a list of the form ((NAME REPOSITORY REVISION)...)."
    packages)
   (xpkg-asort 'xpkg-keyword-alist))
 
-(defun xpkg-keywords (name repo rev &optional associate batch)
-  "Process the keywords of the package named NAME.
+(defun xpkg-keywords (name repo ref &optional associate nosort)
+  "Process the keywords of REF in REPO of the package named NAME.
 
-REPO is the path to the git repository containing the package; it may be
-bare.  REV has to be an existing revision in that repository.
-
-The provided keywords are returned.
-
-If optional ASSOCIATE is non-nil associate the package with the the
-defined keywords in the value of variable `xpkg-keyword-alist'."
-  (let ((keywords (xpkg-with-mainfile name repo rev (elx-keywords))))
+Return a sorted list of the provided keywords.  If optional ASSOCIATE is
+non-nil associate the package with the the defined keywords in the value
+of variable `xpkg-keyword-alist'."
+  (let ((keywords (xpkg-with-mainfile name repo ref (elx-keywords))))
     (if (not associate)
 	keywords
       (dolist (keyword keywords)
@@ -159,17 +145,19 @@ defined keywords in the value of variable `xpkg-keyword-alist'."
 	      (unless (member name (cdr keylist))
 		(setcdr keylist (sort (cons name (cdr keylist)) 'string<)))
 	    (push (list keyword name) xpkg-keyword-alist))))
-      (if batch
+      (if nosort
 	  keywords
 	(xpkg-asort 'xpkg-keyword-alist)))))
 
 (defconst xpkg-emacs-features (bound-and-true-p xpkg-emacs-features)
   "List of features provided by Emacs.
+
 This variable should be set and saved when a new version of GNU Emacs is
 being targeted and then remain constant.")
 
 (defun xpkg-initialize-emacs-features (&optional directory)
   "Initialize the value of `xpkg-emacs-features'.
+
 Optional DIRECTORY is the directory where the lisp files of the Emacs
 installation for which you want `xpkg-emacs-features' to be set is
 located, if it is nil or not provided is the lisp directory of the
@@ -183,6 +171,7 @@ running Emacs instance."
 
 (defvar xpkg-feature-alist nil
   "Alist of known features and the providing packages.
+
 Each element is a cons cell whose car is a feature symbol and whose cdr is
 the providing package, a string.  This variable has to be set when using
 function `xpkg-features' with the DEPENDENCIES argument; this can
@@ -190,7 +179,8 @@ be done by first calling this function for all known packages.")
 
 (defun xpkg-initialize-feature-alist (packages &optional check)
   "Recreate the value of `xpkg-feature-alist'.
-PACKAGES is a list of the form ((NAME REPOSITORY REVISION)...).
+
+PACKAGES is a list of the form ((NAME REPOSITORY REF)...).
 If multiple packages provide the same features this is logged.
 If optional CHECK is non-nil also report unsatisfied dependencies."
   (interactive)
@@ -208,11 +198,11 @@ If optional CHECK is non-nil also report unsatisfied dependencies."
      packages))
   (xpkg-asort 'xpkg-feature-alist))
 
-(defun xpkg-features (name repo rev &optional associate dependencies batch)
+(defun xpkg-features (name repo ref &optional associate dependencies batch)
   "Process the features of the package named NAME.
 
 REPO is the path to the git repository containing the package; it may be
-bare.  REV has to be an existing revision in that repository.
+bare.  REF has to be an existing commit in that repository.
 
 If optional DEPENDENCIES is non-nil return a list of the form:
 
@@ -244,12 +234,12 @@ Also see the source comments of this function for more information."
 	 (exclude-required (plist-get config :exclude-required))
 	 (exclude-provided (plist-get config :exclude-provided))
 	 (exclude-path     (plist-get config :exclude-path)))
-    (dolist (file (elx-elisp-files-git repo rev))
+    (dolist (file (elx-elisp-files-git repo ref))
       ;; Files that match `exclude-path' are ignored completely; neither
       ;; the provided nor required features appear anywhere in the return
       ;; value of this function at all.
       (unless (and exclude-path (string-match exclude-path file))
-	(dolist (prov (lgit-with-file repo rev file (elx--buffer-provided)))
+	(dolist (prov (lgit-with-file repo ref file (elx--buffer-provided)))
 	  ;; If a package bundles required dependencies we do not want
 	  ;; these features to appear in the list of provided features so
 	  ;; that other packages do not pull in these packages instead of
@@ -282,7 +272,7 @@ Also see the source comments of this function for more information."
 	      ;; package but might never-the-less illegitimately provide
 	      ;; a foreign feature to indicate that is a drop-in
 	      ;; replacement or whatever.
-	      (push (lgit-with-file repo rev file (elx--buffer-required))
+	      (push (lgit-with-file repo ref file (elx--buffer-required))
 		    required))))))
     (setq provided (elx--sanitize-provided provided t))
     (when associate
@@ -296,17 +286,17 @@ Also see the source comments of this function for more information."
       ;;
       ;; The value of `xpkg-feature-alist' is not always updated when this
       ;; function is called because it is called for all versions as well
-      ;; as the tips of all vendor branches and these different revisions
+      ;; as the tips of all vendor branches and these different refs
       ;; might differ in what features they provide.  If the caller of this
       ;; function could not control whether associations are updated or not
       ;; this could result in seemingly random change depending on what
-      ;; revision was last processed.
+      ;; ref was last processed.
       ;;
       ;; Since Emacs provides no way to specify what version of a package
-      ;; another package depends on a particular revision had to be
+      ;; another package depends on a particular ref had to be
       ;; chosen whose provided features are recorded to calculate the
-      ;; dependencies of other packages.  The latest tagged revision
-      ;; of the "main" vendor or if no tagged revision exists it's tip
+      ;; dependencies of other packages.  The latest tagged ref
+      ;; of the "main" vendor or if no tagged ref exists it's tip
       ;; has been chosen for this purpose, but this is controlled by the
       ;; callers of this function not itself.
       (dolist (prov provided)
@@ -330,14 +320,15 @@ Also see the source comments of this function for more information."
 	provided
       (setq required (elx--sanitize-required required provided t))
       (list provided
-	    (xpkg-lookup-required name rev 'hard (nth 0 required)
+	    (xpkg-lookup-required name ref 'hard (nth 0 required)
 				  exclude-required)
-	    (xpkg-lookup-required name rev 'soft (nth 1 required)
+	    (xpkg-lookup-required name ref 'soft (nth 1 required)
 				  exclude-required)
 	    (sort bundled 'string<)))))
 
-(defun xpkg-lookup-required (name rev type required exclude)
+(defun xpkg-lookup-required (name ref type required exclude)
   "Return the packages providing all features in list REQUIRED.
+
 The returned value has the form: ((PACKAGE FEATURE...)...).  If a feature
 is provided by a package that is part of Emacs PACKAGE is \"emacs\" even
 if the real package is also mirrored.  If the package providing a feature
@@ -351,7 +342,7 @@ waring messages."
 	  (:excluded)
 	  (nil
 	   (xpkg-log "%s (%s): %s required %s not available"
-		     name rev type feature))
+		     name ref type feature))
 	  (t
 	   (let ((entry (assoc package packages)))
 	     (if entry
