@@ -75,12 +75,14 @@
 
 ;;; Files.
 
-(defun xpkg-elisp-files (rev)
-  (mapcan (lambda (file)
-	    (when (and (string-match "\\.el\\(\\.in\\)?$" file)
-		       (not (string-match "\\(\\`\\|/\\)\\." file)))
-	      (list file)))
-	  (magit-git-lines "ls-tree" "-r" "--name-only" rev)))
+(defun xpkg-libraries (rev config)
+  (let ((exclude (plist-get config :exclude-path)))
+    (mapcan (lambda (file)
+	      (when (and (string-match "\\.el\\(\\.in\\)?$" file)
+			 (not (string-match "\\(\\`\\|/\\)\\." file))
+			 (not (and exclude (string-match exclude file))))
+		(list file)))
+	    (magit-git-lines "ls-tree" "-r" "--name-only" rev))))
 
 (defun xpkg-mainfile (ref config)
   "Return the mainfile of REF in the current git repository.
@@ -93,7 +95,7 @@ is ignored.  If there is still no match try to extract the value of
 `:mainfile' from the plist CONFIG."
   (let ((name (plist-get config :name))
 	(explicit (plist-get config :mainfile))
-	(files (xpkg-elisp-files ref)))
+	(files (xpkg-libraries ref config)))
     (if (= 1 (length files))
 	(car files)
       (flet ((match (feature)
@@ -166,40 +168,35 @@ Also see the source comments of this function for more information."
 	;; loaded.
 	(exclude-required (plist-get config :exclude-required))
 	(exclude-provided (plist-get config :exclude-provided))
-	(exclude-path     (plist-get config :exclude-path))
 	provided required bundled)
-    (dolist (file (xpkg-elisp-files ref))
-      ;; Files that match `exclude-path' are ignored completely; neither
-      ;; the provided nor required features appear anywhere in the return
-      ;; value of this function at all.
-      (unless (and exclude-path (string-match exclude-path file))
-	(xpkg-with-file ref file
-	  (dolist (prov (xpkg--provided))
-	    ;; If a package bundles required dependencies we do not want
-	    ;; these features to appear in the list of provided features so
-	    ;; that other packages do not pull in these packages instead of
-	    ;; the real upstream package.
-	    ;;
-	    ;; If a library is bundled and the actual upstream package is
-	    ;; *not* mirrored then the features it provides do not appear
-	    ;; in the list returned by this function.
-	    ;;
-	    ;; If a library is bundled and the actual upstream package *is*
-	    ;; mirrored then that package along with the features provided
-	    ;; by the bundled library appears in the list of required
-	    ;; packages.
-	    (if (member prov exclude-provided)
-		(add-to-list 'bundled prov)
-	      (when prov
-		(add-to-list 'provided prov))
-	      (unless associate
-		;; If some but not all of the features provided by a file
-		;; are excluded do not exclude the additional features.
-		;; We do this because the file might be legitimately belong
-		;; to the package but might never-the-less illegitimately
-		;; provide a foreign feature to indicate that is a drop-in
-		;; replacement.
-		(push (xpkg--required) required)))))))
+    (dolist (file (xpkg-libraries ref config))
+      (xpkg-with-file ref file
+	(dolist (prov (xpkg--provided))
+	  ;; If a package bundles required dependencies we do not want
+	  ;; these features to appear in the list of provided features so
+	  ;; that other packages do not pull in these packages instead of
+	  ;; the real upstream package.
+	  ;;
+	  ;; If a library is bundled and the actual upstream package is
+	  ;; *not* mirrored then the features it provides do not appear
+	  ;; in the list returned by this function.
+	  ;;
+	  ;; If a library is bundled and the actual upstream package *is*
+	  ;; mirrored then that package along with the features provided
+	  ;; by the bundled library appears in the list of required
+	  ;; packages.
+	  (if (member prov exclude-provided)
+	      (add-to-list 'bundled prov)
+	    (when prov
+	      (add-to-list 'provided prov))
+	    (unless associate
+	      ;; If some but not all of the features provided by a file
+	      ;; are excluded do not exclude the additional features.
+	      ;; We do this because the file might be legitimately belong
+	      ;; to the package but might never-the-less illegitimately
+	      ;; provide a foreign feature to indicate that is a drop-in
+	      ;; replacement.
+	      (push (xpkg--required) required))))))
     (setq provided (xpkg--sanitize-provided provided))
     (if associate
 	;; If and only if optional argument ASSOCIATE is non-nil add
