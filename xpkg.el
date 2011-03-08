@@ -139,24 +139,6 @@ the providing package, a string.  This variable has to be set when using
 function `xpkg-features' with the DEPENDENCIES argument; this can
 be done by first calling this function for all known packages.")
 
-(defun xpkg-initialize-feature-alist (packages)
-  "Recreate the value of `xpkg-feature-alist'.
-
-PACKAGES is a list of the form ((NAME REPOSITORY REF)...).
-If multiple packages provide the same features this is logged."
-  (interactive)
-  (setq xpkg-feature-alist nil)
-  (mapc-with-progress-reporter
-   "Initializing feature alist..."
-   (lambda (elt)
-     (apply 'xpkg-features (append elt (list t nil t))))
-   packages)
-  (mapc-with-progress-reporter
-   "Checking feature consistency..."
-   (lambda (elt)
-     (apply 'xpkg-features (append elt (list t t t))))
-   packages)
-  (xpkg-asort 'xpkg-feature-alist))
 
 (defun xpkg-features (ref config &optional associate dependencies batch)
   "Process the features of the package named NAME.
