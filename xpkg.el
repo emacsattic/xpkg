@@ -41,7 +41,7 @@
   "Return the metadata of REF in the current git repository."
   (let* ((name (plist-get config :name))
 	 (fetcher (plist-get config :fetcher))
-	 (features (xpkg-features ref config nil t))
+	 (features (xpkg-features ref config))
 	 (hard-deps (nth 1 features))
 	 (soft-deps (nth 2 features)))
     (xpkg-with-file ref (xpkg-mainfile ref config)
@@ -139,41 +139,35 @@ the providing package, a string.  This variable has to be set when using
 function `xpkg-features' with the DEPENDENCIES argument; this can
 be done by first calling this function for all known packages.")
 
+(defun xpkg-features (ref config &optional associate)
+  "Process the features of REF in the current git repository.
 
-(defun xpkg-features (ref config &optional associate dependencies batch)
-  "Process the features of the package named NAME.
+If optional ASSOCIATE is non-nil associate the provided features with the
+current package (extracted from property `:name' in CONFIG) and return a
+list of the provided features.
 
-REPO is the path to the git repository containing the package; it may be
-bare.  REF has to be an existing commit in that repository.
-
-If optional DEPENDENCIES is non-nil return a list of the form:
+Otherwise not only determine provided features but also the features and
+packages required by the current package and return a list of the form:
 
   ((PROVIDED-FEATURE...)
    ((PROVIDING-PACKAGE HARD-REQUIRED-FEATURE...)...)
    ((PROVIDING-PACKAGE SOFT-REQUIRED-FEATURE...)...)
    (BUNDLED-FEATURE...))
 
-Otherwise return:
-
-  (PROVIDED-FEATURE...)
-
-If optional ASSOCIATE is non-nil associate the provided features with the
-package in the value of variable `xpkg-feature-alist', if appropriate.
-
 Also see the source comments of this function for more information."
-  (let* ((name (plist-get config :name))
-	 ;; When a package bundles libraries also distributed seperately
-	 ;; the features these libraries provide have to be excluded from
-	 ;; the list of features provided by the package.
-	 ;;
-	 ;; Likewise some features that appear to be required by a package
-	 ;; sometimes are not, because they are only needed for testing or
-	 ;; by some library belonging to the package which is normally not
-	 ;; loaded.
-	 (exclude-required (plist-get config :exclude-required))
-	 (exclude-provided (plist-get config :exclude-provided))
-	 (exclude-path     (plist-get config :exclude-path))
-	 provided required bundled)
+  (let ((name (plist-get config :name))
+	;; When a package bundles libraries also distributed seperately
+	;; the features these libraries provide have to be excluded from
+	;; the list of features provided by the package.
+	;;
+	;; Likewise some features that appear to be required by a package
+	;; sometimes are not, because they are only needed for testing or
+	;; by some library belonging to the package which is normally not
+	;; loaded.
+	(exclude-required (plist-get config :exclude-required))
+	(exclude-provided (plist-get config :exclude-provided))
+	(exclude-path     (plist-get config :exclude-path))
+	provided required bundled)
     (dolist (file (xpkg-elisp-files ref))
       ;; Files that match `exclude-path' are ignored completely; neither
       ;; the provided nor required features appear anywhere in the return
@@ -186,78 +180,62 @@ Also see the source comments of this function for more information."
 	    ;; that other packages do not pull in these packages instead of
 	    ;; the real upstream package.
 	    ;;
-	    ;; We do this even if the upstream package is not mirrored yet;
-	    ;; which means that other packages depending on features from
-	    ;; the upstream package will have unresolved dependencies, but
-	    ;; that is still better than instead depending on the current
-	    ;; package whose purpose might be something completely different
-	    ;; but just happens to provide a common dependency.  However for
-	    ;; the current package these features are not considered to be
-	    ;; missing.
+	    ;; If a library is bundled and the actual upstream package is
+	    ;; *not* mirrored then the features it provides do not appear
+	    ;; in the list returned by this function.
 	    ;;
-	    ;; If a bundled feature is not provided by any mirrored package
-	    ;; that feature is neither listed as required nor a provided
-	    ;; feature of this package in the output of this function.
-	    ;;
-	    ;; If a bundled feature is also provided by the mirrored
-	    ;; upstream package that package along with the feature shows up
-	    ;; in the list of required packages.
+	    ;; If a library is bundled and the actual upstream package *is*
+	    ;; mirrored then that package along with the features provided
+	    ;; by the bundled library appears in the list of required
+	    ;; packages.
 	    (if (member prov exclude-provided)
 		(add-to-list 'bundled prov)
 	      (when prov
 		(add-to-list 'provided prov))
-	      (when dependencies
-		;; Even if some of the features provided by this file are
-		;; excluded do not exclude the required features.  We do
-		;; this because the file might be legitimately belong to the
-		;; package but might never-the-less illegitimately provide
-		;; a foreign feature to indicate that is a drop-in
-		;; replacement or whatever.
+	      (unless associate
+		;; If some but not all of the features provided by a file
+		;; are excluded do not exclude the additional features.
+		;; We do this because the file might be legitimately belong
+		;; to the package but might never-the-less illegitimately
+		;; provide a foreign feature to indicate that is a drop-in
+		;; replacement.
 		(push (xpkg--required) required)))))))
     (setq provided (xpkg--sanitize-provided provided))
-    (when associate
-      ;; If and only if optional argument ASSOCIATE is non-nil add
-      ;; associations for the provided features to the value of variable
-      ;; `xpkg-feature-alist' unless another package is already
-      ;; associated with the feature and the current package does not win
-      ;; based on a comparison of it's package name with the feature name.
-      ;; In case of conflict and regardless which package wins a warning
-      ;; is shown.
-      ;;
-      ;; The value of `xpkg-feature-alist' is not always updated when this
-      ;; function is called because it is called for all versions as well
-      ;; as the tips of all vendor branches and these different refs
-      ;; might differ in what features they provide.  If the caller of this
-      ;; function could not control whether associations are updated or not
-      ;; this could result in seemingly random change depending on what
-      ;; ref was last processed.
-      ;;
-      ;; Since Emacs provides no way to specify what version of a package
-      ;; another package depends on a particular ref had to be
-      ;; chosen whose provided features are recorded to calculate the
-      ;; dependencies of other packages.  The latest tagged ref
-      ;; of the "main" vendor or if no tagged ref exists it's tip
-      ;; has been chosen for this purpose, but this is controlled by the
-      ;; callers of this function not itself.
-      (dolist (prov provided)
-	(let ((elt (assoc prov xpkg-feature-alist)))
-	  (if elt
-	      (unless (equal (cdr elt) name)
-		(xpkg-log "Feature %s provided by %s and %s"
-			  prov (cdr elt) name)
-		(when (eq (intern name) prov)
-		  (aput 'xpkg-feature-alist prov name)))
-	    (aput 'xpkg-feature-alist prov name))))
-      (unless batch
-	;; Keep `xpkg-feature-alist' sorted.
-	(xpkg-asort 'xpkg-feature-alist)))
-    (if (not dependencies)
-	;; This function usually is called to update/create revision epkgs
-	;; and to updated the value of variable `xpkg-feature-alist' by
-	;; side-effect.  However in some cases we only need to do the
-	;; latter so it is possible to skip the step of determining the
-	;; dependencies.
-	provided
+    (if associate
+	;; If and only if optional argument ASSOCIATE is non-nil add
+	;; associations for the provided features to the value of variable
+	;; `xpkg-feature-alist' unless another package is already
+	;; associated with the feature and the current package does not win
+	;; based on a comparison of it's package name with the feature name.
+	;; In case of conflict and regardless which package wins a warning
+	;; is shown.
+	;;
+	;; The value of `xpkg-feature-alist' is not always updated when this
+	;; function is called because it is called for all versions as well
+	;; as the tips of all vendor branches and these different refs
+	;; might differ in what features they provide.  If the caller of this
+	;; function could not control whether associations are updated or not
+	;; this could result in seemingly random change depending on what
+	;; ref was last processed.
+	;;
+	;; Since Emacs provides no way to specify what version of a package
+	;; another package depends on a particular ref had to be
+	;; chosen whose provided features are recorded to calculate the
+	;; dependencies of other packages.  The latest tagged ref
+	;; of the "main" vendor or if no tagged ref exists it's tip
+	;; has been chosen for this purpose, but this is controlled by the
+	;; callers of this function not itself.
+	(progn (dolist (prov provided)
+		 (let ((elt (assoc prov xpkg-feature-alist)))
+		   (if elt
+		       (unless (equal (cdr elt) name)
+			 (xpkg-log "Feature %s provided by %s and %s"
+				   prov (cdr elt) name)
+			 (when (eq (intern name) prov)
+			   (aput 'xpkg-feature-alist prov name)))
+		     (aput 'xpkg-feature-alist prov name))))
+	       (setq xpkg-feature-alist
+		     (sort* xpkg-feature-alist 'string< :key 'car)))
       (setq required (xpkg--sanitize-required required provided))
       (list provided
 	    (xpkg--lookup-required (nth 0 required) exclude-required name 'hard)
@@ -382,9 +360,6 @@ The message also goes into the `*Messages*' and `*xpkg-log*' buffers."
   (let ((buffer (get-buffer "*xpkg-log*")))
     (when buffer
       (pop-to-buffer buffer))))
-
-(defsubst xpkg-asort (variable)
-  (set variable (sort* (symbol-value variable) 'string< :key 'car)))
 
 (provide 'xpkg)
 ;;; xpkg.el ends here
