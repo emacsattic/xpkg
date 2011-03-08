@@ -73,6 +73,9 @@
 	      :commentary (unless (plist-get config :bad-encoding)
 			    (elx-commentary mainfile)))))))
 
+
+;;; Files.
+
 (defun xpkg-mainfile (ref config)
   "Return the mainfile of REF in the current git repository.
 
@@ -98,8 +101,9 @@ is ignored.  If there is still no match try to extract the value of
 	    (when (or (not files) (member explicit files))
 	      explicit))))))
 
-(defsubst xpkg-asort (variable)
-  (set variable (sort* (symbol-value variable) 'string< :key 'car)))
+
+
+;;; Keywords.
 
 (defvar xpkg-keyword-alist nil
   "Alist of known keywords and the associated packages.
@@ -136,6 +140,9 @@ of variable `xpkg-keyword-alist'."
       (if nosort
 	  keywords
 	(xpkg-asort 'xpkg-keyword-alist)))))
+
+
+;;; Features.
 
 (defconst xpkg-emacs-features (bound-and-true-p xpkg-emacs-features)
   "List of features provided by Emacs.
@@ -352,6 +359,9 @@ waring messages."
 			     (match-beginning 0)))
 	  exclude))))
 
+
+;;; Utilities.
+
 (defun xpkg-log (format-string &rest args)
   "Display a message at the bottom of the screen.
 The message also goes into the `*Messages*' and `*xpkg-log*' buffers."
@@ -365,6 +375,9 @@ The message also goes into the `*Messages*' and `*xpkg-log*' buffers."
   (let ((buffer (get-buffer "*xpkg-log*")))
     (when buffer
       (pop-to-buffer buffer))))
+
+(defsubst xpkg-asort (variable)
+  (set variable (sort* (symbol-value variable) 'string< :key 'car)))
 
 (provide 'xpkg)
 ;;; xpkg.el ends here
