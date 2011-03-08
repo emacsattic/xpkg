@@ -122,45 +122,6 @@ is ignored.  If there is still no match try to extract the value of
 	   ,@body)))))
 
 
-;;; Keywords.
-
-(defvar xpkg-keyword-alist nil
-  "Alist of known keywords and the associated packages.
-Has the form ((KEYWORD PACKAGE...)...).")
-
-(defun xpkg-initialize-keyword-alist (packages)
-  "Initialize the value of `xpkg-keyword-alist'.
-PACKAGES is a list of the form ((NAME REPO REF CONFIG)...)."
-  (interactive)
-  (setq xpkg-keyword-alist nil)
-  (mapc-with-progress-reporter
-   "Initializing keyword alist..."
-   (lambda (elt)
-     (apply 'xpkg-keywords (append elt (list t t))))
-   packages)
-  (xpkg-asort 'xpkg-keyword-alist))
-
-(defun xpkg-keywords (ref config &optional associate nosort)
-  "Process the keywords of REF in REPO of the package named NAME.
-
-Return a sorted list of the provided keywords.  If optional ASSOCIATE is
-non-nil associate the package with the the defined keywords in the value
-of variable `xpkg-keyword-alist'."
-  (let ((keywords (xpkg-with-file ref (xpkg-mainfile ref config)
-		    (elx-keywords))))
-    (if (not associate)
-	keywords
-      (dolist (keyword keywords)
-	(let ((keylist (assoc keyword xpkg-keyword-alist)))
-	  (if keylist
-	      (unless (member name (cdr keylist))
-		(setcdr keylist (sort (cons name (cdr keylist)) 'string<)))
-	    (push (list keyword name) xpkg-keyword-alist))))
-      (if nosort
-	  keywords
-	(xpkg-asort 'xpkg-keyword-alist)))))
-
-
 ;;; Features.
 
 ;; TODO again add function to update this
