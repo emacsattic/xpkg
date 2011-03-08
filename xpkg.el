@@ -4,7 +4,7 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110306
+;; Updated: 20110308
 ;; Version: 0.1.2-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: docs, libraries, packages
@@ -33,18 +33,19 @@
 ;;; Code:
 
 (require 'cl)
-(require 'lgit)
+(require 'magit)
 (require 'elx)
 (require 'elm)
 
-(defun xpkg-metadata (name repo ref &optional config)
-  "Return the metadata of REF in REPO of the package named NAME."
-  (let* ((fetcher (plist-get config :fetcher))
-	 (features (xpkg-features name repo ref nil t))
+(defun xpkg-metadata (ref config)
+  "Return the metadata of REF in the current git repository."
+  (let* ((name (plist-get config :name))
+	 (fetcher (plist-get config :fetcher))
+	 (features (xpkg-features ref config nil t))
 	 (hard-deps (nth 1 features))
 	 (soft-deps (nth 2 features))
-	 (mainfile (xpkg-mainfile name repo ref config)))
-    (lgit-with-file repo ref mainfile
+	 (mainfile (xpkg-mainfile ref config)))
+    (elx-with-file (cons ref mainfile)
       (let ((wikipage (or (let ((page (plist-get config :wikipage)))
 			    (when page
 			      (concat "http://www.emacswiki.org/" page)))
@@ -72,16 +73,18 @@
 	      :commentary (unless (plist-get config :bad-encoding)
 			    (elx-commentary mainfile)))))))
 
-(defun xpkg-mainfile (name repo ref &optional config)
-  "Return the mainfile of REF in REPO of the package named NAME.
+(defun xpkg-mainfile (ref config)
+  "Return the mainfile of REF in the current git repository.
 
-The returned path is relative to REPO of nil if the mainfile can't be
-determined.  If REF contains only one file return that.  Otherwise return
-the path of the file whose basename matches NAME or NAME with \"-mode\"
-added to or removed from the end, whatever makes sense; case is ignored.
-If there is still no match try to extract the value of `:mainfile' from
-the plist CONFIG."
-  (let ((files (elx-elisp-files (cons repo ref))))
+The returned path is relative to the repository of nil if the mainfile
+can't be determined.  If REF contains only one file return that.
+Otherwise return the file whose basename matches NAME or NAME with
+\"-mode\" added to or removed from the end, whatever makes sense; case
+is ignored.  If there is still no match try to extract the value of
+`:mainfile' from the plist CONFIG."
+  (let ((name (plist-get config :name))
+	(explicit (plist-get config :mainfile))
+	(files (elx-elisp-files (cons default-directory ref))))
     (if (= 1 (length files))
 	(car files)
       (flet ((match (feature)
@@ -92,22 +95,8 @@ the plist CONFIG."
 	    (match (if (string-match "-mode$" name)
 		       (substring name 0 -5)
 		     (concat name "-mode")))
-	    (let ((mainfile (plist-get (elm-package-config name) :mainfile)))
-	      (when (or (not files) (member mainfile files))
-		mainfile)))))))
-
-(defmacro xpkg-with-mainfile (name repo ref config &rest body)
- (declare (indent 4) (debug t))
- (let ((repo-sym (make-symbol "--xpkg-with-mainfile-repo--"))
-       (ref-sym  (make-symbol "--xpkg-with-mainfile-ref--"))
-       (conf-sym (make-symbol "--xpkg-with-mainfile-conf--")))
-   `(let ((,repo-sym ,repo)
-	  (,ref-sym  ,ref)
-	  (,conf-sym ,config))
-      (lgit-with-file ,repo-sym ,ref-sym
-		      (or (xpkg-mainfile name ,repo-sym ,ref-sym ,conf-sym)
-			  (error "The mainfile can not be determined"))
-	,@body))))
+	    (when (or (not files) (member explicit files))
+	      explicit))))))
 
 (defsubst xpkg-asort (variable)
   (set variable (sort* (symbol-value variable) 'string< :key 'car)))
@@ -128,13 +117,14 @@ PACKAGES is a list of the form ((NAME REPO REF CONFIG)...)."
    packages)
   (xpkg-asort 'xpkg-keyword-alist))
 
-(defun xpkg-keywords (name repo ref &optional config associate nosort)
+(defun xpkg-keywords (ref config &optional associate nosort)
   "Process the keywords of REF in REPO of the package named NAME.
 
 Return a sorted list of the provided keywords.  If optional ASSOCIATE is
 non-nil associate the package with the the defined keywords in the value
 of variable `xpkg-keyword-alist'."
-  (let ((keywords (xpkg-with-mainfile name repo ref config (elx-keywords))))
+  (let ((keywords (elx-with-file (cons ref (xpkg-mainfile ref config))
+		    (elx-keywords))))
     (if (not associate)
 	keywords
       (dolist (keyword keywords)
@@ -194,7 +184,7 @@ If multiple packages provide the same features this is logged."
    packages)
   (xpkg-asort 'xpkg-feature-alist))
 
-(defun xpkg-features (name repo ref &optional associate dependencies batch)
+(defun xpkg-features (ref config &optional associate dependencies batch)
   "Process the features of the package named NAME.
 
 REPO is the path to the git repository containing the package; it may be
@@ -215,10 +205,7 @@ If optional ASSOCIATE is non-nil associate the provided features with the
 package in the value of variable `xpkg-feature-alist', if appropriate.
 
 Also see the source comments of this function for more information."
-  (let* (required
-	 bundled
-	 (config (elm-package-config name))
-	 (provided (mapcar 'intern (plist-get config :include-provided)))
+  (let* ((name (plist-get config :name))
 	 ;; When a package bundles libraries also distributed seperately
 	 ;; the features these libraries provide have to be excluded from
 	 ;; the list of features provided by the package.
@@ -229,13 +216,14 @@ Also see the source comments of this function for more information."
 	 ;; loaded.
 	 (exclude-required (plist-get config :exclude-required))
 	 (exclude-provided (plist-get config :exclude-provided))
-	 (exclude-path     (plist-get config :exclude-path)))
-    (dolist (file (elx-elisp-files-git repo ref))
+	 (exclude-path     (plist-get config :exclude-path))
+	 provided required bundled)
+    (dolist (file (elx-elisp-files-git (cons default-directory ref)))
       ;; Files that match `exclude-path' are ignored completely; neither
       ;; the provided nor required features appear anywhere in the return
       ;; value of this function at all.
       (unless (and exclude-path (string-match exclude-path file))
-	(dolist (prov (lgit-with-file repo ref file (elx--buffer-provided)))
+	(dolist (prov (elx-with-file (cons ref file) (elx--buffer-provided)))
 	  ;; If a package bundles required dependencies we do not want
 	  ;; these features to appear in the list of provided features so
 	  ;; that other packages do not pull in these packages instead of
@@ -268,7 +256,7 @@ Also see the source comments of this function for more information."
 	      ;; package but might never-the-less illegitimately provide
 	      ;; a foreign feature to indicate that is a drop-in
 	      ;; replacement or whatever.
-	      (push (lgit-with-file repo ref file (elx--buffer-required))
+	      (push (elx-with-file (cons ref file) (elx--buffer-required))
 		    required))))))
     (setq provided (elx--sanitize-provided provided t))
     (when associate
