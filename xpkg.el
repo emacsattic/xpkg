@@ -5,9 +5,9 @@
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
 ;; Updated: 20110308
-;; Version: 0.1.2-git
+;; Version: 0.2.0
 ;; Homepage: https://github.com/tarsius/xpkg
-;; Keywords: docs, libraries, packages
+;; Keywords: git packages
 
 ;; This file is not part of GNU Emacs.
 
@@ -26,9 +26,7 @@
 
 ;;; Commentary:
 
-;; Extract information from Emacs Lisp packages.
-;; Packages are required to be stored inside git repositories.
-;; Also see package `elx' which extracts information from libraries.
+;; Extract information from Emacs Lisp packages stored in git repositores.
 
 ;;; Code:
 
