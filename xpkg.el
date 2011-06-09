@@ -4,8 +4,8 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110308
-;; Version: 0.2.0
+;; Updated: 20110609
+;; Version: 0.2.0-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -123,13 +123,6 @@ is ignored.  If there is still no match try to extract the value of
 
 
 ;;; Features.
-
-;; TODO again add function to update this
-(defconst xpkg-emacs-features (bound-and-true-p xpkg-emacs-features)
-  "List of features provided by Emacs.
-
-This variable should be set and saved when a new version of GNU Emacs is
-being targeted and then remain constant.")
 
 (defvar xpkg-feature-alist nil
   "Alist of known features and the providing packages.
@@ -260,8 +253,7 @@ Also see the source comments of this function for more information."
 
 (defun xpkg--lookup-required-1 (feature exclude)
   "Return a string representing the package that provides FEATURE."
-  (cond ((member feature xpkg-emacs-features) "emacs")
-	((member feature exclude) :excluded)
+  (cond ((member feature exclude) :excluded)
 	((not (string-match "-autoloads?$" (symbol-name feature)))
 	 (cdr (assoc feature xpkg-feature-alist)))
 	(t
