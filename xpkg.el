@@ -183,6 +183,7 @@ Also see the source comments of this function for more information."
 	    (unless associate
 	      ;; If some but not all of the features provided by a file
 	      ;; are excluded do not exclude the additional features.
+	      ;;
 	      ;; We do this because the file might be legitimately belong
 	      ;; to the package but might never-the-less illegitimately
 	      ;; provide a foreign feature to indicate that is a drop-in
@@ -207,12 +208,11 @@ Also see the source comments of this function for more information."
 	;; ref was last processed.
 	;;
 	;; Since Emacs provides no way to specify what version of a package
-	;; another package depends on a particular ref had to be
-	;; chosen whose provided features are recorded to calculate the
-	;; dependencies of other packages.  The latest tagged ref
-	;; of the "main" vendor or if no tagged ref exists it's tip
-	;; has been chosen for this purpose, but this is controlled by the
-	;; callers of this function not itself.
+	;; another package depends on callers of this function have to ensure
+	;; that they are consistent about what ref is used when using
+	;; ASSOCIATE, or the features provided by a package might randomly
+	;; change depending on what ref was last used as argument to this
+	;; function.
 	(progn (dolist (prov provided)
 		 (let ((elt (assoc prov xpkg-feature-alist)))
 		   (if elt
