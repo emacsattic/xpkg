@@ -5,7 +5,7 @@
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
 ;; Updated: 20110609
-;; Version: 0.2.0-git
+;; Version: 0.2.1
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
