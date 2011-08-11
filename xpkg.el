@@ -4,8 +4,8 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110609
-;; Version: 0.2.1
+;; Updated: 20110811
+;; Version: 0.2.2
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -53,9 +53,9 @@
 	      :created (elx-created)
 	      :updated (elx-updated)
 	      :license (elx-license)
-	      :authors (elx-authors nil t)
-	      :maintainer (elx-maintainer nil t)
-	      :adapted-by (elx-adapted-by nil t)
+	      :authors (elx-authors)
+	      :maintainer (elx-maintainer)
+	      :adapted-by (elx-adapted-by)
 	      :provided (car features)
 	      :required (when (or hard-deps soft-deps)
 			  (if soft-deps
