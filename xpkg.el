@@ -4,8 +4,8 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110811
-;; Version: 0.2.2
+;; Updated: 20110822
+;; Version: 0.2.3
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -38,6 +38,7 @@
 (defun xpkg-metadata (ref config)
   "Return the metadata of REF in the current git repository."
   (let* ((name (plist-get config :name))
+	 (url (plist-get config :url))
 	 (fetcher (plist-get config :fetcher))
 	 (features (xpkg-features ref config))
 	 (hard-deps (nth 1 features))
@@ -49,7 +50,7 @@
 			  (elx-wikipage nil name nil t))))
 	(list :summary (elx-summary nil t)
 	      :repository (when (memq fetcher '(bzr cvs darcs git hg svn))
-			    (cons fetcher (plist-get config :url)))
+			    (cons fetcher url))
 	      :created (elx-created)
 	      :updated (elx-updated)
 	      :license (elx-license)
@@ -62,10 +63,15 @@
 			      (list hard-deps soft-deps)
 			    (list hard-deps)))
 	      :keywords (elx-keywords nil t)
-	      :homepage (or (elx-homepage)
-			    (plist-get config :homepage)
-			    (when (eq 'wiki (plist-get config :fetcher))
-			      wikipage))
+	      :homepage
+	      (or (elx-homepage)
+		  (plist-get config :homepage)
+		  (case (plist-get config :fetcher)
+		    (wiki wikipage)
+		    (git
+		     (and (not (eq (plist-get config :suspended) :unavailable))
+			  (string-match "^git://github.com/\\(.+?\\)\\.git" url)
+			  (concat "https://github.com/" (match-string 1 url))))))
 	      :wikipage wikipage
 	      :commentary (unless (plist-get config :bad-encoding)
 			    (elx-commentary)))))))
