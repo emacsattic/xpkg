@@ -4,8 +4,7 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Updated: 20110822
-;; Version: 0.2.3
+;; Version: 0.2.4
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -31,7 +30,10 @@
 ;;; Code:
 
 (require 'cl)
+
+(require 'arc-mode) ; `archive-set-buffer-as-visiting-file'
 (require 'magit)
+
 (require 'elx)
 (require 'elm)
 
