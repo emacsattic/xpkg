@@ -4,7 +4,7 @@
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Version: 0.2.4
+;; Version: 0.2.4-git
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -90,20 +90,17 @@
 		(list file)))
 	    (magit-git-lines "ls-tree" "-r" "--name-only" rev))))
 
-(defun xpkg-mainfile (ref config)
-  "Return the mainfile of REF in the current git repository.
-
-The returned path is relative to the repository of nil if the mainfile
-can't be determined.  If REF contains only one file return that.
-Otherwise return the file whose basename matches NAME or NAME with
-\"-mode\" added to or removed from the end, whatever makes sense; case
-is ignored.  If there is still no match try to extract the value of
-`:mainfile' from the plist CONFIG."
+(defun xpkg-mainfile (rev config)
+  "Return the mainfile of REV in the current git repository."
   (let ((name (plist-get config :name))
 	(explicit (plist-get config :mainfile))
-	(files (xpkg-libraries ref config)))
-    (if (= 1 (length files))
-	(car files)
+	(files (xpkg-libraries rev config)))
+    (cond
+     ((= 1 (length files))
+      (car files))
+     ((or (not files) (member explicit files))
+      explicit)
+     (t
       (flet ((match (feature)
 		    (car (member* (format "^\\(.+?/\\)?%s\\.el\\(\\.in\\)?$"
 					  (regexp-quote feature))
@@ -111,9 +108,7 @@ is ignored.  If there is still no match try to extract the value of
 	(or (match name)
 	    (match (if (string-match "-mode$" name)
 		       (substring name 0 -5)
-		     (concat name "-mode")))
-	    (when (or (not files) (member explicit files))
-	      explicit))))))
+		     (concat name "-mode")))))))))
 
 (defmacro xpkg-with-file (rev file &rest body)
   (declare (indent 2) (debug t))
