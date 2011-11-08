@@ -1,10 +1,14 @@
 ;;; xpkg.el --- extract information from Emacs Lisp packages
 
+;; *** This library is obsolete.                                     ***
+;; *** It was used by library elm and isn't very useful on it's own. ***
+;; *** A better implementation will be integrated into elm itself.   ***
+
 ;; Copyright (C) 2010-2011  Jonas Bernoulli
 
 ;; Author: Jonas Bernoulli <jonas@bernoul.li>
 ;; Created: 20101001
-;; Version: 0.2.4-git
+;; Version: 0.2.5
 ;; Homepage: https://github.com/tarsius/xpkg
 ;; Keywords: git packages
 
@@ -135,7 +139,7 @@ the providing package, a string.  This variable has to be set when using
 function `xpkg-features' with the DEPENDENCIES argument; this can
 be done by first calling this function for all known packages.")
 
-(defun xpkg-features (ref config &optional associate)
+(defun xpkg-features (ref config &optional associate libraries)
   "Process the features of REF in the current git repository.
 
 If optional ASSOCIATE is non-nil associate the provided features with the
@@ -163,7 +167,7 @@ Also see the source comments of this function for more information."
 	(exclude-required (plist-get config :exclude-required))
 	(exclude-provided (plist-get config :exclude-provided))
 	provided required bundled)
-    (dolist (file (xpkg-libraries ref config))
+    (dolist (file (or libraries (xpkg-libraries ref config)))
       (xpkg-with-file ref file
 	(dolist (prov (xpkg--provided))
 	  ;; If a package bundles required dependencies we do not want
